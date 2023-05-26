@@ -69,7 +69,7 @@ influx_client = InfluxDBClient(
 
 write_client = influx_client.write_api(write_options=SYNCHRONOUS)
 
-if len(crypto_symbol) and len(crypto_timeframe) != 0 or 1 :
+if len(crypto_timeframe) != 0 or 1 :
     while True:
         for p_timeframe in crypto_timeframe:
             for pair in crypto_symbol:
