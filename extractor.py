@@ -77,6 +77,8 @@ async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
         )
         ohlcv_dataframe.set_index('_time', inplace=True)
         ohlcv_dataframe.index = pd.to_datetime(ohlcv_dataframe.index, unit='ms')
+        # ohlcv_dataframe['_time'] = pd.to_datetime(ohlcv_dataframe['_time'], unit='ms')
+        # print(ohlcv_dataframe['_time'][0])
         await exchange_instance.close()
         print(f" > successfully: -- {crypto_pair}_{pair_timeframe}")
 
@@ -93,12 +95,6 @@ async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
         try:
            # Create data points as list
             data_points = []
-            
-            # point = Point(crypto_pair).tag("_timeframe", pair_timeframe).time(timestamp, write_precision='ms')
-
-            # for field, value in ohlcv_dataframe.items():
-            #     point.field(field=field, value=value)
-            #     print(f"\n\nField: {field}\nType: {type(field)}\nValue: {value}\nType: {type(value)}")
 
             for timestamp, values in ohlcv_dataframe.iterrows():
                 point = Point(crypto_pair).tag("timeframe", pair_timeframe).time(timestamp, write_precision='ms')
@@ -111,14 +107,15 @@ async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
             successfully = await write_api.write(
                 bucket = bucket, 
                 record = data_points,
-                data_frame_measurement_name = crypto_pair,
-                # data_frame_timestamp_column = ohlcv_dataframe.index.name,
+                # data_frame_measurement_name = crypto_pair,
+                # data_frame_timestamp_column = (x for x in ohlcv_dataframe['_time']),
                 # data_frame_tag_columuns = pair_timeframe
                 )
             print(f" > successfully: {successfully} -- {crypto_pair}_{pair_timeframe}")
 
         except Exception as e:
             print(e)
+            print(f"Write to influx failed for {crypto_pair}_{crypto_timeframe}")
 
 async def main():
 
