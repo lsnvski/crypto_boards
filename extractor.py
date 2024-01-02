@@ -1,9 +1,8 @@
 import ccxt.async_support as ccxt
 import pandas as pd
 import asyncio
-import time, datetime
-from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
+import datetime
+from influxdb_client import Point
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 import values
 
@@ -38,30 +37,24 @@ async def query_influx_lasttimestamp(pair, timeframe):
         except Exception as e:
             return None
     
-# ohlcv_last_timestamp = asyncio.run(query_influx_lasttimestamp("BTC/USDT", "4h"))
-# print(ohlcv_last_timestamp)
-
 # GET and reform dataframe for infuxdb. Set timestamp as index
 async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
 
-    # await exchange_instance.load_markets()
-
-    print(f"\n-------\nExtract OHLCV from\nExchange: {exchange}, \nPair: {crypto_pair}, {crypto_timeframe} \n-------\n\n")
+    # print(f"\n-------\nExtract OHLCV from\nExchange: {exchange}, \nPair: {crypto_pair}\n-------\n\n")
     try:
         
         ## Initialize Binance ccxt and load markets
         exchange_class = getattr(ccxt, exchange)
         exchange_instance = exchange_class()
         exchange_instance.enableRateLimit = True
-        # await exchange_instance.load_markets()
 
         last_timestamp = await query_influx_lasttimestamp(pair=crypto_pair, timeframe=pair_timeframe)
 
         if last_timestamp != None:
             response_raw = await exchange_instance.fetch_ohlcv(
-                symbol=crypto_pair,
-                timeframe=pair_timeframe,
-                since= await query_influx_lasttimestamp(pair=crypto_pair, timeframe=pair_timeframe)
+                symbol = crypto_pair,
+                timeframe = pair_timeframe,
+                since = await query_influx_lasttimestamp(pair=crypto_pair, timeframe=pair_timeframe)
                 )
         else:
             response_raw = await exchange_instance.fetch_ohlcv(
@@ -84,29 +77,24 @@ async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
         )
         ohlcv_dataframe.set_index('_time', inplace=True)
         ohlcv_dataframe.index = pd.to_datetime(ohlcv_dataframe.index, unit='ms')
-        # print(f" > successfully: \nType: {type(ohlcv_dataframe)}, \nLen: {(len(ohlcv_dataframe))}") 
-        # print(ohlcv_dataframe.tail(10))
+        # ohlcv_dataframe['_time'] = pd.to_datetime(ohlcv_dataframe['_time'], unit='ms')
+        # print(ohlcv_dataframe['_time'][0])
         await exchange_instance.close()
+        print(f" > successfully: -- {crypto_pair}_{pair_timeframe}")
 
     except Exception as e:
         print(e)
-        print('fetch_OHLCV() failed')
+        print(f" > fetch_OHLCV() failed: {crypto_pair}_{pair_timeframe}")
         await exchange_instance.close()
 
     async with InfluxDBClientAsync(url, token, org) as influx_client_write:
 
         write_api = influx_client_write.write_api()
 
-        print(f"\n------- Write data by async API: -------\n")
+        # print(f"\n------- Write data by async API: -------\n")
         try:
            # Create data points as list
             data_points = []
-            
-            # point = Point(crypto_pair).tag("_timeframe", pair_timeframe).time(timestamp, write_precision='ms')
-
-            # for field, value in ohlcv_dataframe.items():
-            #     point.field(field=field, value=value)
-            #     print(f"\n\nField: {field}\nType: {type(field)}\nValue: {value}\nType: {type(value)}")
 
             for timestamp, values in ohlcv_dataframe.iterrows():
                 point = Point(crypto_pair).tag("timeframe", pair_timeframe).time(timestamp, write_precision='ms')
@@ -114,22 +102,20 @@ async def ohlcv_to_df(exchange, crypto_pair, pair_timeframe):
                 for field, value in values.items():
                     point.field(field, float(value))
                 
-                data_points.append(point)
-            
-            
-            # print(data_points)
+                data_points.append(point)          
 
             successfully = await write_api.write(
                 bucket = bucket, 
                 record = data_points,
-                data_frame_measurement_name = crypto_pair,
-                # data_frame_timestamp_column = ohlcv_dataframe.index.name,
+                # data_frame_measurement_name = crypto_pair,
+                # data_frame_timestamp_column = (x for x in ohlcv_dataframe['_time']),
                 # data_frame_tag_columuns = pair_timeframe
                 )
-            print(f" > successfully: {successfully}")
+            print(f" > successfully: {successfully} -- {crypto_pair}_{pair_timeframe}")
 
         except Exception as e:
             print(e)
+            print(f"Write to influx failed for {crypto_pair}_{crypto_timeframe}")
 
 async def main():
 
@@ -143,6 +129,5 @@ async def main():
     # Run the tasks concurrently
     await asyncio.gather(*tasks)
 
-# asyncio.run(ohlcv_to_df(binance, 'ADA/USDT', '1h'))
 if __name__ == "__main__":
     asyncio.run(main())
