@@ -162,7 +162,7 @@ async def main():
 
     for pair in values.CRYPTO_PAIR:
         for timeframe in values.CRYPTO_TIMEFRAME:
-            tasks.append(InfluxDBDataProcessor.create('bybit', pair, timeframe))
+            tasks.append(InfluxDBDataProcessor.create('binance', pair, timeframe))
 
             # Wait for the initialization tasks to complete
     instances = await asyncio.gather(*tasks)
