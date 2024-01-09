@@ -7,6 +7,8 @@ INFLUXDB_URL=""
 INFLUXDB_BUCKET=""
 
 ## Data Variables for ccxt
+EXCHANGE="binance"
+
 CRYPTO_PAIR=[
     'ADA/USDT',
     'BTC/USDT',
@@ -20,4 +22,18 @@ CRYPTO_TIMEFRAME=[
     '30m',
     '1h',
 ]
-# CRYPTO_SINCE="2023-05-23 00:04:00+00:00" 
+INDICATORS=[
+
+]
+GROUPS=[
+    # 'Cycle Indicators',
+    # 'Math Operators',
+    # 'Math Transform',
+    # 'Momentum Indicators',
+    # 'Overlap Studies', 
+    # 'Pattern Recognition', 
+    # 'Price Transform', 
+    # 'Statistic Functions', 
+    # 'Volatility Indicators', 
+    # 'Volume Indicators' 
+    ]

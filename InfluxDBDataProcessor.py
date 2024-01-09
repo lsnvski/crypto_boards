@@ -7,8 +7,40 @@ from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 import talib  # Make sure to import talib library
 
 class InfluxDBDataProcessor:
+    """
+    A class for processing and managing cryptocurrency OHLCV data, utilizing InfluxDB for storage.
 
-    def __init__(self, exchange, pair: list, timeframe: list):
+    Attributes:
+        token (str): InfluxDB token for authentication.
+        org (str): InfluxDB organization.
+        url (str): InfluxDB server URL.
+        bucket (str): InfluxDB bucket for storing data.
+        crypto_symbol (str): Symbol representing the cryptocurrency pair.
+        crypto_timeframe (str): Timeframe for cryptocurrency data.
+        exchange (str): Cryptocurrency exchange name.
+        pair (list): List of symbols representing the trading pair.
+        timeframe (list): List of timeframes for data.
+        df (pd.DataFrame): Pandas DataFrame to store OHLCV data.
+
+    Methods:
+        create(cls, exchange, pair, timeframe): Asynchronously creates an instance of InfluxDBDataProcessor.
+        initialize_dataframe(): Asynchronously initializes the DataFrame by fetching OHLCV data.
+        query_influx_lasttimestamp(): Asynchronously queries InfluxDB for the latest data timestamp.
+        ohlcv_to_df(): Asynchronously fetches OHLCV data from an exchange and converts it into a DataFrame.
+        query_influx_ohlcv(): Asynchronously queries InfluxDB for OHLCV data.
+        calculate_indicators(groups=None, indicators=None, **kwargs): Asynchronously calculates TA-Lib indicators.
+        write_df_influx(): Asynchronously writes DataFrame to InfluxDB.
+    """
+
+    def __init__(self, exchange: str, pair: list, timeframe: list):
+        """
+        Initializes the InfluxDBDataProcessor instance.
+
+        Parameters:
+            exchange (str): Cryptocurrency exchange name.
+            pair (list): List of symbols representing the trading pair.
+            timeframe (list): List of timeframes for data.
+        """
         self.token = values.INFLUXDB_TOKEN
         self.org = values.INFLUXDB_ORG
         self.url = values.INFLUXDB_URL
@@ -21,12 +53,27 @@ class InfluxDBDataProcessor:
         self.df = None
 
     @classmethod
+    
     async def create(cls, exchange, pair, timeframe):
+        """
+        Asynchronously creates an instance of InfluxDBDataProcessor.
+
+        Parameters:
+            exchange (str): Cryptocurrency exchange name.
+            pair (list): List of symbols representing the trading pair.
+            timeframe (list): List of timeframes for data.
+
+        Returns:
+            InfluxDBDataProcessor: An instance of InfluxDBDataProcessor.
+        """
         self = cls(exchange, pair, timeframe)
         await self.initialize_dataframe()  # Initialize dataframe asynchronously
         return self
 
     async def initialize_dataframe(self):
+        """
+        Asynchronously initializes the DataFrame by fetching OHLCV data.
+        """
         self.dataframe = await self.ohlcv_to_df()
 
     async def query_influx_lasttimestamp(self):
@@ -130,6 +177,12 @@ class InfluxDBDataProcessor:
             return None
 
     async def query_influx_ohlcv(self):
+        """
+        Asynchronously queries InfluxDB for OHLCV data.
+
+        Returns:
+            pd.DataFrame: DataFrame containing queried OHLCV data, or None if an error occurs.
+        """
         async with InfluxDBClientAsync(url=self.url, token=self.token, org=self.org) as influx_client:
             query = f'from(bucket: "{self.bucket}")\
                     |> range(start: 0)\
@@ -239,6 +292,9 @@ class InfluxDBDataProcessor:
             print(f"\nDataframe is empty or no Dataframe is defined: {self.df}")
 
     async def write_df_influx(self):
+        """
+        Asynchronously writes DataFrame to InfluxDB.
+        """
         async with InfluxDBClientAsync(self.url, self.token, self.org) as influx_client_write:
             write_api = influx_client_write.write_api()
 
