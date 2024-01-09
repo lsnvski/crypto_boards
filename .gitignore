@@ -162,3 +162,8 @@ cython_debug/
 # Personal stuff
 influxdb-token.txt
 values.py
+.vscode/
+influx-async-client.py
+kafka-test.py
+querier.py
+extractor.py
