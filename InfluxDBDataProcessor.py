@@ -1,7 +1,6 @@
 import ccxt.async_support as ccxt
 import pandas as pd
-import asyncio
-import values
+import values, asyncio, inspect
 import datetime
 from influxdb_client import Point
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
@@ -31,42 +30,71 @@ class InfluxDBDataProcessor:
         self.dataframe = await self.ohlcv_to_df()
 
     async def query_influx_lasttimestamp(self):
-        async with InfluxDBClientAsync(url=self.url, token=self.token, org=self.org) as influx_client:
-            query = f'from(bucket: "{self.bucket}")\
-                |> range(start: 0)\
-                |> filter(fn: (r) => r["_measurement"] == "{self.pair}" and r.timeframe == "{self.timeframe}" and r._field == "_volume")\
-                |> last()'
+        """
+        Asynchronous function to query the InfluxDB database and retrieve the timestamp of the latest data point.
 
-            query_api = influx_client.query_api()
+        Returns:
+            int: Timestamp of the latest data point in milliseconds since epoch, or None if an error occurs.
+        """
+
+        # Establish asynchronous connection to InfluxDB
+        async with InfluxDBClientAsync(url=self.url, token=self.token, org=self.org) as influx_client:
             
+            # Construct InfluxDB Flux query
+            query = f'from(bucket: "{self.bucket}")\
+                    |> range(start: 0)\
+                    |> filter(fn: (r) => r["_measurement"] == "{self.pair}" and r.timeframe == "{self.timeframe}" and r._field == "_volume")\
+                    |> last()'
+
+            # Get InfluxDB query API
+            query_api = influx_client.query_api()
+
             try:
+                # Execute the asynchronous query
                 result = await query_api.query(query=query)
+
+                # Extract and process the timestamp of the latest data point
                 last_time = list(result)[0].records[0].values["_time"]
                 return int(datetime.datetime.strptime(str(last_time), "%Y-%m-%d %H:%M:%S%z").timestamp() * 1000)
+            
             except Exception as e:
+                # Handle exceptions and return None in case of an error
                 return None
 
     async def ohlcv_to_df(self):
+        """
+        Asynchronous function to fetch OHLCV data from a cryptocurrency exchange and convert it into a DataFrame.
+
+        Returns:
+            pd.DataFrame: DataFrame containing OHLCV data, or None if an error occurs.
+        """
         try:
+            # Dynamically create an instance of the specified exchange class using ccxt
             exchange_class = getattr(ccxt, self.exchange)
             exchange_instance = exchange_class()
             exchange_instance.enableRateLimit = True
 
+            # Get the timestamp of the latest data point from InfluxDB
             last_timestamp = await self.query_influx_lasttimestamp()
 
-            if last_timestamp is not None:
-                response_raw = await exchange_instance.fetch_ohlcv(
-                    symbol=self.pair,
-                    timeframe=self.timeframe,
-                    since=last_timestamp
-                )
-            else:
-                response_raw = await exchange_instance.fetch_ohlcv(
-                    symbol=self.pair,
-                    timeframe=self.timeframe,
-                    since=last_timestamp
-                )
+            # # Fetch OHLCV data from the exchange
+            # if last_timestamp is not None:
+            #     response_raw = await exchange_instance.fetch_ohlcv(
+            #         symbol=self.pair,
+            #         timeframe=self.timeframe,
+            #         since=last_timestamp
+            #     )
+            # else:
+            #     response_raw = await exchange_instance.fetch_ohlcv(
+            #         symbol=self.pair,
+            #         timeframe=self.timeframe,
+            #     )
+            response_raw = await exchange_instance.fetch_ohlcv(
+                symbol=self.pair,
+                timeframe=self.timeframe,
+            )
 
+            # Convert the raw response to a Pandas DataFrame
             ohlcv_dataframe = pd.DataFrame(
                 response_raw,
                 columns=[
@@ -78,21 +106,27 @@ class InfluxDBDataProcessor:
                     '_volume'
                 ]
             )
+
+            # Set the '_time' column as the DataFrame index and convert it to datetime format
             ohlcv_dataframe.set_index('_time', inplace=True)
             ohlcv_dataframe.index = pd.to_datetime(ohlcv_dataframe.index, unit='ms')
+
+            # Update the class attribute with the resulting DataFrame
             self.df = ohlcv_dataframe
 
+            # Close the exchange connection
             await exchange_instance.close()
+
+            # Print success message and return the DataFrame
             print(f"> ohlcv_to_df() successfully: -- {self.pair}_{self.timeframe}")
-
-            self.df = ohlcv_dataframe
-
             return ohlcv_dataframe
 
         except Exception as e:
-            print(f"> ohlcv_to_df() failed for: {self.pair}_{self.timeframe}\n\n > Error: {e}")
-
+            # Handle exceptions and return None in case of an error
+            print(f"> ohlcv_to_df() error: {str(e)}")
+            
             await exchange_instance.close()
+            
             return None
 
     async def query_influx_ohlcv(self):
@@ -120,18 +154,89 @@ class InfluxDBDataProcessor:
                 print(e)
                 return None
 
-    async def calculate_indicators(self):
-        if self.df is not None:
-            try:
-                real = talib.OBV(self.df['_close'], self.df['_volume'])
-                self.df['_real'] = real
+    async def calculate_indicators(self, groups: list = None, indicators: list = None, **kwargs):
+        """
+        Asynchronous function to calculate TA-Lib indicators based on the provided groups or a specific list of indicators.
 
-                print(f"> calculate_indicators() successfully: -- {self.pair}_{self.timeframe}")
-            except Exception as e:
-                print(f"> calculate_indicators() failed for: {self.pair}_{self.timeframe}\n\n > Error: {e}")
+        Parameters:
+            groups (list): List of indicator groups to calculate. Default is None.
+            indicators (list): List of specific indicator names to calculate. Default is None.
+            **kwargs: Additional keyword arguments for indicator parameters.
+
+        Returns:
+            None: The function updates the DataFrame with calculated indicators.
+        """
+
+        if self.df is not None:
+            all_indicators = talib.get_function_groups()
+
+            if groups:
+                indicators_to_calculate = [indicator for group in groups for indicator in all_indicators[group]]
+
+            elif indicators:
+                indicators_to_calculate = indicators
+
+            else:
+                print("No groups or indicators specified.")
                 return None
+
+            for indicator in indicators_to_calculate:
+                try:
+                    # Use the DataFrame columns as arguments
+                    arguments = self.df.columns.tolist()
+
+                    # Remove the time column if it exists
+                    # arguments.remove('_measurement')
+                    # arguments.remove('timeframe')
+
+                    # Use additional keyword arguments for specific parameters
+                    if indicator in kwargs:
+                        additional_args = kwargs[indicator]
+                        arguments.extend(additional_args)
+
+                    # Initiate the indicator class & get arguments 
+                    indicator_instance = getattr(talib, indicator)
+                    indicator_signature = inspect.signature(indicator_instance)
+
+                    param_names = []
+                    for param in indicator_signature.parameters.values():
+                        if param.name == 'real':
+                            param_names.append('_close')
+                        elif f'_{param.name}' in arguments:
+                            param_names.append(f'_{param.name}')
+                    
+                    # if len(param_names) == 1:
+                    #     indicator_instance_init = indicator_instance(self.df[param_names[0]])
+                    # else:
+                    #     indicator_instance_init = indicator_instance(*[self.df[param] for param in param_names])
+
+                    indicator_instance_init = indicator_instance(*[self.df[param] for param in param_names])
+
+                    # Create a DataFrame with the new columns
+                    result_df = pd.DataFrame(index=self.df.index)
+                    df_indicator_column = f'_{indicator.lower()}'
+
+                    if isinstance(indicator_instance_init, pd.Series):
+                        indicator_instance_init.name = df_indicator_column
+                        result_df[df_indicator_column] = indicator_instance_init
+
+                    elif isinstance(indicator_instance_init, tuple):
+                        for num, series in enumerate(indicator_instance_init):
+                            series.name = df_indicator_column + f'-{num}'
+                            result_df[series.name] = series
+
+                    # Concatenate the new DataFrame with the original DataFrame
+                    self.df = pd.concat([self.df, result_df], axis=1)
+
+                    print(f"> calculate_indicators();{indicator} successfully: -- {self.pair}_{self.timeframe}")
+
+                except Exception as e:
+                    print(f"> calculate_indicators();{indicator} failed for: {self.pair}_{self.timeframe}\n\n > Error: {e}")
+                    # print(f"Length of result: {len(result)}\nResult: {result}")
+                    # print(f"Number of rows in DataFrame: {self.df.tail(10)}")
+                    return None
         else:
-            print(f"\nDataframe is empy or no Dataframe is defined: {self.df}")
+            print(f"\nDataframe is empty or no Dataframe is defined: {self.df}")
 
     async def write_df_influx(self):
         async with InfluxDBClientAsync(self.url, self.token, self.org) as influx_client_write:
@@ -157,35 +262,14 @@ class InfluxDBDataProcessor:
             except Exception as e:
                 print(f"> write_df_influx() failed for: {self.pair}_{self.timeframe}\n > Error: {e}")
 
-async def main():
-    tasks = []
+# Example calls
+# await instances.calculate_indicators(groups=['Momentum Indicators'])
+# or
 
-    for pair in values.CRYPTO_PAIR:
-        for timeframe in values.CRYPTO_TIMEFRAME:
-            tasks.append(InfluxDBDataProcessor.create('binance', pair, timeframe))
+# instance = asyncio.run(InfluxDBDataProcessor.create(values.EXCHANGE, "BTC/USDT", '4h'))
 
-            # Wait for the initialization tasks to complete
-    instances = await asyncio.gather(*tasks)
+# calculators = asyncio.run(instance.calculate_indicators(groups=values.GROUPS)) 
 
-    # Now, perform subsequent tasks asynchronously for each initialized instance
-    calculation_tasks = [x.calculate_indicators() for x in instances]
-
-    # for instance in instances:
-    #     # Assuming you want to calculate indicators for each instance
-    #     calculation_tasks.append(instance.calculate_indicators())
-
-   # Wait for the calculation tasks to complete
-    await asyncio.gather(*calculation_tasks)
-
-    # Perform other tasks if needed...
-
-    # Finally, write to InfluxDB for each initialized instance
-    write_tasks = []
-    for instance in instances:
-        write_tasks.append(instance.write_df_influx())
-
-    # Wait for the write tasks to complete
-    await asyncio.gather(*write_tasks)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# # calculators = asyncio.run(instance.calculate_indicators(indicators=["BBANDS"])) 
+# asyncio.run(instance.write_df_influx())
+ 
